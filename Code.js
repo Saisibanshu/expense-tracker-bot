@@ -280,25 +280,39 @@ function handleAddExpense(chatId, args) {
     let currentDesc = (descCell.getValue() || "").toString();
     log(`handleAddExpense: Found row ${rowNumber}. Current val: ${currentAmount}, "${currentDesc}"`);
 
-    // Normalize items (positive numeric)
-    const valid = [];
-    let addTotal = 0;
-    for (const it of args.items) {
-      const name = (it.item || "").toString().trim();
-      const amt = Number(it.amount);
-      if (!name || isNaN(amt) || amt <= 0) continue;
-      valid.push({ item: name, amount: amt });
-      addTotal += amt;
-    }
+    // --- FIX START: Compare model's list with current sheet state ---
 
-    if (valid.length === 0) {
-      sendMessage(chatId, "⚠️ I couldn't find valid items/amounts. Try: `Add tea 10`.");
-      log("handleAddExpense: No valid items found after parsing.");
+    // 1. Parse the items already in the sheet into a map for quick lookup.
+    const existingItems = parseItems(currentDesc);
+    const existingItemsMap = new Map(existingItems.map(i => [i.item.toLowerCase(), i]));
+
+    // 2. Filter the model's list to find only the items that are NOT already in the sheet.
+    const newItemsToAdd = [];
+    for (const modelItem of args.items) {
+      const name = (modelItem.item || "").toString().trim();
+      const amt = Number(modelItem.amount);
+      if (!name || isNaN(amt) || amt <= 0) continue; // Basic validation
+
+      // If the item from the model doesn't exist in our sheet map, it's new.
+      if (!existingItemsMap.has(name.toLowerCase())) {
+        newItemsToAdd.push({ item: name, amount: amt });
+      }
+    }
+    // --- FIX END ---
+
+    if (newItemsToAdd.length === 0) {
+      sendMessage(chatId, `ℹ️ No new expenses to add for ${args.date}. Total is still *₹${fmt(currentAmount)}*.`);
+      log("handleAddExpense: No new items found after filtering.");
       return;
     }
 
-    // Our canonical description format: "Item amount, Item amount"
-    const addSegments = valid.map(x => `${x.item} ${fmt(x.amount)}`).join(", ");
+    // 3. Calculate the total and description segment for ONLY the new items.
+    let addTotal = 0;
+    for (const it of newItemsToAdd) {
+      addTotal += it.amount;
+    }
+
+    const addSegments = newItemsToAdd.map(x => `${x.item} ${fmt(x.amount)}`).join(", ");
     const finalAmount = currentAmount + addTotal;
     const finalDesc = mergeDescriptions(currentDesc, addSegments);
     log(`handleAddExpense: New total: ${finalAmount}. New desc: "${finalDesc}"`);

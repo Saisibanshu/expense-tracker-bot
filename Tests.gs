@@ -1,121 +1,137 @@
 /**************************************************************
  * Tests.gs
  * ------------------------------------------------------------
- * This file contains unit tests for the utility functions.
+ * This file contains a lightweight testing framework and unit
+ * tests for the utility functions.
  **************************************************************/
 
 /**
- * @description A custom assertion function for testing.
- * @param {boolean} condition - The condition to check.
- * @param {string} message - The message to log if the condition is false.
+ * @description A simple testing framework for Google Apps Script.
  */
-function assert(condition, message) {
-  if (!condition) {
-    Logger.log('Assertion failed: ' + message);
+const TestRunner = {
+  stats: {
+    total: 0,
+    passed: 0,
+    failed: 0,
+  },
+
+  /**
+   * @description Runs a block of tests.
+   * @param {string} suiteName - The name of the test suite.
+   * @param {function} tests - A function containing the tests.
+   */
+  run: function(suiteName, tests) {
+    Logger.log(`\n--- Running test suite: ${suiteName} ---`);
+    tests(this);
+  },
+
+  /**
+   * @description A generic assertion function.
+   * @param {string} description - A description of the test case.
+   * @param {function} testCase - A function that returns true for pass, false for fail.
+   */
+  test: function(description, testCase) {
+    this.stats.total++;
+    try {
+      if (testCase()) {
+        this.stats.passed++;
+        Logger.log(`  [PASSED] ${description}`);
+      } else {
+        this.stats.failed++;
+        Logger.log(`  [FAILED] ${description}`);
+      }
+    } catch (e) {
+      this.stats.failed++;
+      Logger.log(`  [ERROR] ${description}: ${e.message}`);
+    }
+  },
+
+  /**
+   * @description Asserts that two values are equal.
+   * @param {*} expected - The expected value.
+   * @param {*} actual - The actual value.
+   * @param {string} message - A message for the test case.
+   */
+  assertEquals: function(expected, actual, message) {
+    this.stats.total++;
+    // Basic deep comparison for arrays of objects
+    if (JSON.stringify(expected) === JSON.stringify(actual)) {
+      this.stats.passed++;
+      Logger.log(`  [PASSED] ${message}`);
+    } else {
+      this.stats.failed++;
+      Logger.log(`  [FAILED] ${message}`);
+      Logger.log(`    Expected: ${JSON.stringify(expected)}`);
+      Logger.log(`    Actual:   ${JSON.stringify(actual)}`);
+    }
+  },
+
+  /**
+   * @description Logs the final test results.
+   */
+  logResults: function() {
+    Logger.log("\n--- Test Results ---");
+    Logger.log(`Total tests: ${this.stats.total}`);
+    Logger.log(`Passed: ${this.stats.passed}`);
+    Logger.log(`Failed: ${this.stats.failed}`);
+    Logger.log("--------------------");
   }
-}
+};
 
 /**
  * @description Runs all the unit tests and logs the results.
- * This function can be run from the Apps Script editor to
- * verify that the utility functions are working correctly.
  */
 function runTests() {
-  Logger.log("Running tests...");
-  testParseItems();
-  testDescribeDiff();
-  testFmt();
-  testMergeDescriptions();
-  Logger.log("Tests finished.");
-}
+  TestRunner.run("Utils.gs", (t) => {
+    // Test suite for parseItems
+    t.run("parseItems", () => {
+      const desc1 = "coffee 50, sandwich 120";
+      const expected1 = [{ item: "coffee", amount: 50 }, { item: "sandwich", amount: 120 }];
+      t.assertEquals(expected1, parseItems(desc1), "should parse a description with multiple items");
 
-/**
- * @description Tests the parseItems function.
- */
-function testParseItems() {
-  Logger.log("Testing parseItems...");
+      const desc2 = "pizza 250";
+      const expected2 = [{ item: "pizza", amount: 250 }];
+      t.assertEquals(expected2, parseItems(desc2), "should parse a description with a single item");
 
-  // Test case 1: A description with multiple items
-  const desc1 = "coffee 50, sandwich 120";
-  const items1 = parseItems(desc1);
-  assert(items1.length === 2, "testParseItems 1 failed");
-  assert(items1[0].item === "coffee", "testParseItems 2 failed");
-  assert(items1[0].amount === 50, "testParseItems 3 failed");
-  assert(items1[1].item === "sandwich", "testParseItems 4 failed");
-  assert(items1[1].amount === 120, "testParseItems 5 failed");
+      const desc3 = "";
+      const expected3 = [];
+      t.assertEquals(expected3, parseItems(desc3), "should handle an empty description");
+    });
 
-  // Test case 2: A description with a single item
-  const desc2 = "pizza 250";
-  const items2 = parseItems(desc2);
-  assert(items2.length === 1, "testParseItems 6 failed");
-  assert(items2[0].item === "pizza", "testParseItems 7 failed");
-  assert(items2[0].amount === 250, "testParseItems 8 failed");
+    // Test suite for describeDiff
+    t.run("describeDiff", () => {
+        const before1 = [{ item: "coffee", amount: 50 }, { item: "sandwich", amount: 120 }];
+        const after1 = [{ item: "coffee", amount: 60 }, { item: "sandwich", amount: 120 }];
+        t.assertEquals("Updated coffee: 50 → 60", describeDiff(before1, after1), "should detect an updated item");
 
-  // Test case 3: An empty description
-  const desc3 = "";
-  const items3 = parseItems(desc3);
-  assert(items3.length === 0, "testParseItems 9 failed");
-}
+        const before2 = [{ item: "coffee", amount: 50 }];
+        const after2 = [];
+        t.assertEquals("Removed coffee ₹50", describeDiff(before2, after2), "should detect a removed item");
 
-/**
- * @description Tests the describeDiff function.
- */
-function testDescribeDiff() {
-  Logger.log("Testing describeDiff...");
+        const before3 = [];
+        const after3 = [{ item: "coffee", amount: 50 }];
+        t.assertEquals("Added coffee ₹50", describeDiff(before3, after3), "should detect an added item");
+    });
 
-  // Test case 1: An item is updated
-  const before1 = [{ item: "coffee", amount: 50 }, { item: "sandwich", amount: 120 }];
-  const after1 = [{ item: "coffee", amount: 60 }, { item: "sandwich", amount: 120 }];
-  const diff1 = describeDiff(before1, after1);
-  assert(diff1 === "Updated coffee: 50 → 60", "testDescribeDiff 1 failed");
+    // Test suite for fmt
+    t.run("fmt", () => {
+      t.assertEquals("50", fmt(50), "should format an integer");
+      t.assertEquals("50.50", fmt(50.5), "should format a float");
+      t.assertEquals("0", fmt(null), "should handle null");
+      t.assertEquals("0", fmt(undefined), "should handle undefined");
+    });
 
-  // Test case 2: An item is removed
-  const before2 = [{ item: "coffee", amount: 50 }];
-  const after2 = [];
-  const diff2 = describeDiff(before2, after2);
-  assert(diff2 === "Removed coffee ₹50", "testDescribeDiff 2 failed");
+    // Test suite for mergeDescriptions
+    t.run("mergeDescriptions", () => {
+      const desc1 = "coffee 50";
+      const add1 = "sandwich 120";
+      t.assertEquals("coffee 50, sandwich 120", mergeDescriptions(desc1, add1), "should merge two descriptions");
 
-  // Test case 3: An item is added
-  const before3 = [];
-  const after3 = [{ item: "coffee", amount: 50 }];
-  const diff3 = describeDiff(before3, after3);
-  assert(diff3 === "Added coffee ₹50", "testDescribeDiff 3 failed");
-}
+      const desc2 = "";
+      const add2 = "sandwich 120";
+      t.assertEquals("sandwich 120", mergeDescriptions(desc2, add2), "should merge with an empty description");
+    });
+  });
 
-/**
- * @description Tests the fmt function.
- */
-function testFmt() {
-  Logger.log("Testing fmt...");
-
-  // Test case 1: An integer
-  assert(fmt(50) === "50", "testFmt 1 failed");
-
-  // Test case 2: A float
-  assert(fmt(50.5) === "50.50", "testFmt 2 failed");
-
-  // Test case 3: null
-  assert(fmt(null) === "0", "testFmt 3 failed");
-
-  // Test case 4: undefined
-  assert(fmt(undefined) === "0", "testFmt 4 failed");
-}
-
-/**
- * @description Tests the mergeDescriptions function.
- */
-function testMergeDescriptions() {
-  Logger.log("Testing mergeDescriptions...");
-
-  // Test case 1: Merging two descriptions
-  const desc1 = "coffee 50";
-  const add1 = "sandwich 120";
-  const merged1 = mergeDescriptions(desc1, add1);
-  assert(merged1 === "coffee 50, sandwich 120", "testMergeDescriptions 1 failed");
-
-  // Test case 2: Merging with an empty description
-  const desc2 = "";
-  const add2 = "sandwich 120";
-  const merged2 = mergeDescriptions(desc2, add2);
-  assert(merged2 === "sandwich 120", "testMergeDescriptions 2 failed");
+  TestRunner.logResults();
 }

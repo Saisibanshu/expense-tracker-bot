@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://i.imgur.com/4Y6hFXE.png" alt="Expense Tracker Bot">
-</p>
-
 # Expense Tracker Bot
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

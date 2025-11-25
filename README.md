@@ -171,9 +171,6 @@ You can interact with the bot using natural language commands in your Telegram c
 -   **Have a conversation:**
     > `what was my most expensive purchase last month?`
 
-<p align="center">
-  <i>(Add a screenshot of your bot in action here!)</i>
-</p>
 
 ## 🙌 Contributing
 

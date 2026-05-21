@@ -6,6 +6,39 @@
  **************************************************************/
 
 /**
+ * @description The buffer for log statements to write in a single batch.
+ * @type {Array<Array<Date|string>>}
+ */
+let logBuffer = [];
+
+/**
+ * @description Retrieves the correct expenses sheet dynamically based on the current year.
+ * Checks for "Expenses [YEAR]", "[YEAR]", defaulting to SHEET_NAME ("Expenses") or the first sheet.
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} The Spreadsheet Sheet object.
+ */
+function getExpensesSheet() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return null;
+    
+    const year = new Date().getFullYear();
+    const yearSheetName = "Expenses " + year;
+    
+    let sheet = ss.getSheetByName(yearSheetName) || ss.getSheetByName(String(year));
+    if (!sheet) {
+      sheet = ss.getSheetByName(SHEET_NAME);
+    }
+    if (!sheet) {
+      sheet = ss.getSheets()[0];
+    }
+    return sheet;
+  } catch (e) {
+    console.error("getExpensesSheet error: " + e.toString());
+    return null;
+  }
+}
+
+/**
  * @description Finds a row in the sheet by its ISO date.
  * It searches the first column of the sheet for a date that
  * matches the given date string.
@@ -14,7 +47,7 @@
  */
 function findRowByDate(dateString) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+    const sheet = getExpensesSheet();
     if (!sheet) return null;
 
     const targetDate = new Date(dateString);
@@ -40,26 +73,31 @@ function findRowByDate(dateString) {
 }
 
 /**
- * @description Logs a message to the "Logs" sheet.
- * This function appends a new row to the "Logs" sheet with the
- * current timestamp and the given message.
+ * @description Logs a message to the "Logs" sheet by adding it to the log buffer.
+ * This function is non-blocking and relies on flushLogs() to execute at the end.
  * @param {string} message - The message to log.
  */
 function log(message) {
+  console.log(message); // Fallback to Stackdriver
+  logBuffer.push([new Date(), message]);
+}
+
+/**
+ * @description Flushes all buffered logs to the "Logs" sheet in a single batch.
+ */
+function flushLogs() {
+  if (logBuffer.length === 0) return;
   try {
-    // Fetch LOG_SHEET_ID from script properties
     const LOG_SHEET_ID = PropertiesService.getScriptProperties().getProperty("LOG_SHEET_ID");
     if (!LOG_SHEET_ID) {
-      console.error("LOG_SHEET_ID not set in script properties.");
-      // Fallback to Stackdriver if logging sheet ID is missing
-      console.log("log() fallback: " + message);
+      console.log("flushLogs() warning: LOG_SHEET_ID not set. Logs are output only to console.");
       return;
     }
     const ss = SpreadsheetApp.openById(LOG_SHEET_ID);
     const sheet = ss.getSheetByName("Logs") || ss.insertSheet("Logs");
-    sheet.appendRow([new Date(), message]);
+    sheet.getRange(sheet.getLastRow() + 1, 1, logBuffer.length, 2).setValues(logBuffer);
+    logBuffer = [];
   } catch (e) {
-    // Fall back to Stackdriver if logging sheet missing
-    console.error("log() fallback: " + message + " (reason: " + e.toString() + ")");
+    console.error("flushLogs() error: " + e.toString());
   }
 }

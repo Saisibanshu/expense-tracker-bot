@@ -1,0 +1,9 @@
+# Ignore git files
+.git/**
+.gitignore
+
+# Ignore local documentation
+README.md
+
+# Ignore clasp settings themselves
+.clasp.json

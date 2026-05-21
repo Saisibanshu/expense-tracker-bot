@@ -24,6 +24,18 @@ function doPost(e) {
 
     const chatId = message.chat.id;
     chatIdForError = chatId;
+
+    // Security check using whitelist
+    const allowedChatIdsStr = PropertiesService.getScriptProperties().getProperty("ALLOWED_CHAT_IDS");
+    if (allowedChatIdsStr) {
+      const allowedChatIds = allowedChatIdsStr.split(",").map(id => id.trim());
+      if (allowedChatIds.indexOf(String(chatId)) === -1) {
+        log("Unauthorized access attempt from Chat ID: " + chatId);
+        sendMessage(chatId, "🚫 Unauthorized access. This bot is private.");
+        return;
+      }
+    }
+
     const text = message.text.trim();
     const history = getConversationHistory(chatId);
 
@@ -104,5 +116,7 @@ function doPost(e) {
     if (chatIdForError) {
       sendMessage(chatIdForError, "⚠️ Something went wrong processing your message. Please try again.");
     }
+  } finally {
+    flushLogs();
   }
 }

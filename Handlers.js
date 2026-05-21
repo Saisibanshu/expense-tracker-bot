@@ -31,13 +31,11 @@ function handleAddExpense(chatId, args) {
       return;
     }
 
-    // 3. Get the current values from the sheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    const amountCell = sheet.getRange(rowNumber, AMOUNT_COL);
-    const descCell = sheet.getRange(rowNumber, DESC_COL);
-
-    let currentAmount = parseFloat(amountCell.getValue()) || 0;
-    let currentDesc = (descCell.getValue() || "").toString();
+    // 3. Get the current values from the sheet (batch read)
+    const sheet = getExpensesSheet();
+    const rowValues = sheet.getRange(rowNumber, AMOUNT_COL, 1, 2).getValues()[0];
+    let currentAmount = parseFloat(rowValues[0]) || 0;
+    let currentDesc = (rowValues[1] || "").toString();
     log(`handleAddExpense: Found row ${rowNumber}. Current val: ${currentAmount}, "${currentDesc}"`);
 
     // 4. Filter out items that are already in the sheet
@@ -72,9 +70,8 @@ function handleAddExpense(chatId, args) {
     const finalDesc = mergeDescriptions(currentDesc, addSegments);
     log(`handleAddExpense: New total: ${finalAmount}. New desc: "${finalDesc}"`);
 
-    // 6. Update the sheet with the new values
-    amountCell.setValue(Number(finalAmount));
-    descCell.setValue(finalDesc);
+    // 6. Update the sheet with the new values (batch write)
+    sheet.getRange(rowNumber, AMOUNT_COL, 1, 2).setValues([[Number(finalAmount), finalDesc]]);
 
     sendMessage(chatId, `✅ Added: ${addSegments}\nNew total for ${args.date}: *₹${fmt(finalAmount)}*.`);
   } catch (err) {
@@ -93,7 +90,7 @@ function handleAddExpense(chatId, args) {
 function handleGetSummary(chatId, args) {
   try {
     log(`handleGetSummary started. Args: ${JSON.stringify(args)}`);
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+    const sheet = getExpensesSheet();
     const lastRow = sheet.getLastRow();
     const values = (lastRow > 0) ? sheet.getRange(1, 1, lastRow, 3).getValues() : [];
 
@@ -238,13 +235,11 @@ function handleModification(chatId, args) {
       return;
     }
 
-    // 3. Get the current values from the sheet
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    const amountCell = sheet.getRange(rowNumber, AMOUNT_COL);
-    const descCell = sheet.getRange(rowNumber, DESC_COL);
-
-    const currentAmount = Number(amountCell.getValue()) || 0;
-    const currentDesc = (descCell.getValue() || "").toString();
+    // 3. Get the current values from the sheet (batch read)
+    const sheet = getExpensesSheet();
+    const rowValues = sheet.getRange(rowNumber, AMOUNT_COL, 1, 2).getValues()[0];
+    const currentAmount = Number(rowValues[0]) || 0;
+    const currentDesc = (rowValues[1] || "").toString();
 
     log(`handleModification - targetDate=${targetDate} row=${rowNumber}`);
     log(`actionText: ${actionText}`);
@@ -282,9 +277,8 @@ function handleModification(chatId, args) {
       return;
     }
 
-    // 6. Apply the update to the sheet
-    amountCell.setValue(afterAmount);
-    descCell.setValue(afterNormalized);
+    // 6. Apply the update to the sheet (batch write)
+    sheet.getRange(rowNumber, AMOUNT_COL, 1, 2).setValues([[afterAmount, afterNormalized]]);
     log(`handleModification: Updated sheet. New Amount=${afterAmount}. New Desc="${afterNormalized}"`);
 
     // 7. Describe the changes to the user

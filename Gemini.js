@@ -106,31 +106,53 @@ const functionDeclarations = [
 ];
 
 /**
+ * @description The current working Gemini model for this execution.
+ * Resets back to null (using GEMINI_MODEL) on every new webhook invocation.
+ * @type {string|null}
+ */
+let activeGeminiModel = null;
+
+/**
  * @description Centralized helper to call the Gemini API with automatic retry on rate limits (429) or transient 5xx errors.
  * It uses exponential backoff and parses the retryDelay parameter from Google API's error response.
+ * If a 429 is encountered, it falls back to the next model in GEMINI_MODELS_PRIORITY.
  * @param {object} payload - The request payload.
- * @param {string} [modelName] - The Gemini model to call (defaults to GEMINI_MODEL).
+ * @param {string} [modelName] - The Gemini model to call (defaults to activeGeminiModel or GEMINI_MODEL).
  * @param {number} [chatId] - The Telegram chat ID to notify during retries.
  * @returns {object} The parsed JSON response from the API.
  * @throws {Error} Throws an error on non-retryable status codes or after maximum retries.
  */
 function callGemini(payload, modelName, chatId) {
-  const model = modelName || GEMINI_MODEL;
-  const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY");
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not set in script properties.");
+  let startModel = modelName;
+  if (!startModel) {
+    if (!activeGeminiModel) {
+      activeGeminiModel = GEMINI_MODEL;
+    }
+    startModel = activeGeminiModel;
   }
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + GEMINI_API_KEY;
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
 
+  let modelIndex = GEMINI_MODELS_PRIORITY.indexOf(startModel);
+  if (modelIndex === -1) {
+    modelIndex = 0;
+  }
+
+  let currentModel = GEMINI_MODELS_PRIORITY[modelIndex];
   const maxAttempts = 5;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log(`callGemini [${model}]: Attempt ${attempt} of ${maxAttempts}...`);
+    const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY not set in script properties.");
+    }
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/" + currentModel + ":generateContent?key=" + GEMINI_API_KEY;
+    const options = {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    log(`callGemini [${currentModel}]: Attempt ${attempt} of ${maxAttempts}...`);
     const response = UrlFetchApp.fetch(url, options);
     const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
@@ -145,31 +167,52 @@ function callGemini(payload, modelName, chatId) {
 
     // Handle retryable status codes: 429 (Resource Exhausted) and 5xx (Server errors)
     if (statusCode === 429 || (statusCode >= 500 && statusCode < 600)) {
-      log(`callGemini warning (status ${statusCode}): ${responseText}`);
+      log(`callGemini warning (status ${statusCode} on ${currentModel}): ${responseText}`);
+      
+      let modelSwitched = false;
+      if (statusCode === 429 && modelIndex < GEMINI_MODELS_PRIORITY.length - 1) {
+        modelIndex++;
+        const nextModel = GEMINI_MODELS_PRIORITY[modelIndex];
+        log(`429 Hit. Falling back from ${currentModel} to ${nextModel}.`);
+        if (chatId) {
+          sendMessage(chatId, `⚠️ Current model (${currentModel}) rate limit hit. Switching to fallback model: ${nextModel}...`);
+        }
+        currentModel = nextModel;
+        if (!modelName) {
+          activeGeminiModel = nextModel;
+        }
+        modelSwitched = true;
+      }
+
       if (attempt === maxAttempts) {
         throw new Error(`Gemini API failed after ${maxAttempts} attempts with status ${statusCode}: ${responseText}`);
       }
 
       // Calculate delay: Try to parse retryDelay from error response, fallback to exponential backoff
       let delayMs = Math.pow(2, attempt) * 2000 + Math.floor(Math.random() * 1000); // 4s, 8s, 16s, 32s + jitter
-      try {
-        const errorJson = JSON.parse(responseText);
-        const details = errorJson.error?.details;
-        if (details && Array.isArray(details)) {
-          for (let i = 0; i < details.length; i++) {
-            if (details[i].retryDelay) {
-              const delayStr = details[i].retryDelay; // e.g. "28s" or "28.9s"
-              const seconds = parseFloat(delayStr);
-              if (!isNaN(seconds)) {
-                delayMs = Math.ceil(seconds * 1000) + 1000; // Add 1s safety buffer
-                log(`Parsed retryDelay from API: ${delayStr}. Sleeping for ${delayMs}ms.`);
-                break;
+      
+      if (modelSwitched) {
+        delayMs = 1000; // Try fallback model almost immediately
+      } else {
+        try {
+          const errorJson = JSON.parse(responseText);
+          const details = errorJson.error?.details;
+          if (details && Array.isArray(details)) {
+            for (let i = 0; i < details.length; i++) {
+              if (details[i].retryDelay) {
+                const delayStr = details[i].retryDelay; // e.g. "28s" or "28.9s"
+                const seconds = parseFloat(delayStr);
+                if (!isNaN(seconds)) {
+                  delayMs = Math.ceil(seconds * 1000) + 1000; // Add 1s safety buffer
+                  log(`Parsed retryDelay from API: ${delayStr}. Sleeping for ${delayMs}ms.`);
+                  break;
+                }
               }
             }
           }
+        } catch (e) {
+          // Ignore JSON parse errors
         }
-      } catch (e) {
-        // Ignore JSON parse errors for non-JSON or malformed responses
       }
 
       // Cap synchronous sleep to prevent Telegram webhook timeout retries
@@ -179,7 +222,7 @@ function callGemini(payload, modelName, chatId) {
         throw new Error("RATE_LIMIT_EXCEEDED");
       }
 
-      if (chatId) {
+      if (chatId && !modelSwitched) {
         const delaySecs = Math.ceil(delayMs / 1000);
         let notice = `⏳ I encountered a temporary Google API rate limit. Retrying in ${delaySecs} seconds...`;
         if (statusCode >= 500) {

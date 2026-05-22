@@ -15,6 +15,7 @@
  * @param {object} e - The event parameter from the HTTP POST request.
  */
 function doPost(e) {
+  activeGeminiModel = null; // Reset fallback model for the new request
   let chatIdForError = null;
   try {
     // 1. Parse the incoming request from Telegram

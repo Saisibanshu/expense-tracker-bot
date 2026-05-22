@@ -46,3 +46,14 @@ const DESC_COL = 3;
  */
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
 
+/**
+ * @description The fallback priority list of models to use when a 429 occurs.
+ * @type {Array<string>}
+ */
+const GEMINI_MODELS_PRIORITY = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro"
+];
+

@@ -37,10 +37,25 @@ function doPost(e) {
     }
 
     const text = message.text.trim();
+
+    // Check for simple greetings or help requests to bypass Gemini API and save quota
+    if (isSimpleGreetingOrHelp(text)) {
+      const welcome = "*Welcome to Expense Tracker!* 📊\n\n" +
+                      "I help you manage your expenses directly in Google Sheets.\n\n" +
+                      "*Here is what you can do:*\n" +
+                      "* *Add expenses:* \"breakfast 120\", \"cab 250, snacks 50 today\", \"dinner 400 yesterday\"\n" +
+                      "* *Delete expenses:* \"remove tea\", \"delete eggs today\", \"clear all expenses\"\n" +
+                      "* *Update expenses:* \"update coffee to 60\", \"change rent to 9000\"\n" +
+                      "* *Get summaries:* \"summary for this month\", \"expenses this week\", \"how much did I spend on food in the last 2 weeks?\"\n\n" +
+                      "Simply send me a command to get started!";
+      sendMessage(chatId, welcome);
+      return;
+    }
+
     const history = getConversationHistory(chatId);
 
     // 2. Route the user's intent using the Gemini API
-    const modelResponse = routeUserIntent(text, history);
+    const modelResponse = routeUserIntent(text, history, chatId);
     log("modelResponse_Intent: " + JSON.stringify(modelResponse, null, 2));
 
     if (!modelResponse || !modelResponse.content || !modelResponse.content.parts) {
@@ -112,11 +127,32 @@ function doPost(e) {
 
   } catch (err) {
     // 5. Handle any critical errors
-    log("Critical Error in doPost: " + JSON.stringify(err, null, 2));
+    log("Critical Error in doPost: " + (err.message || JSON.stringify(err, null, 2)));
     if (chatIdForError) {
-      sendMessage(chatIdForError, "⚠️ Something went wrong processing your message. Please try again.");
+      if (err.message === "RATE_LIMIT_EXCEEDED") {
+        sendMessage(chatIdForError, "⚠️ Google API rate limit exceeded. Please try again in 1 minute.");
+      } else {
+        sendMessage(chatIdForError, "⚠️ Something went wrong processing your message. Please try again.");
+      }
     }
   } finally {
     flushLogs();
   }
+}
+
+/**
+ * @description Checks if a message is a simple greeting or help request.
+ * @param {string} text - The user's input.
+ * @returns {boolean} True if the input is a simple greeting or help request.
+ */
+function isSimpleGreetingOrHelp(text) {
+  if (!text) return false;
+  const clean = text.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "");
+  return (
+    clean === "hi" ||
+    clean === "hello" ||
+    clean === "hey" ||
+    clean === "start" ||
+    clean === "help"
+  );
 }

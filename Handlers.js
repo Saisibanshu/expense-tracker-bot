@@ -91,32 +91,73 @@ function handleGetSummary(chatId, args) {
   try {
     log(`handleGetSummary started. Args: ${JSON.stringify(args)}`);
     const sheet = getExpensesSheet();
+    if (!sheet) {
+      sendMessage(chatId, "❌ I couldn't access your Expense Sheet. Please check the settings.");
+      return;
+    }
     const lastRow = sheet.getLastRow();
     const values = (lastRow > 0) ? sheet.getRange(1, 1, lastRow, 3).getValues() : [];
+    
+    // Resolve start and end dates (defaulting to current month if not specified)
+    const now = new Date();
+    const start = args.start_date ? new Date(args.start_date) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = args.end_date ? new Date(args.end_date) : now;
+    
+    const startKey = yyyymmdd(start);
+    const endKey = yyyymmdd(end);
 
-    // 1. Handle range summaries
+    const dateDisplayValues = (lastRow > 0) ? sheet.getRange(1, DATE_COL, lastRow, 1).getDisplayValues() : [];
+    
+    // Fetch all records within the date range
+    const rangeRecords = [];
+    let totalInRange = 0;
+    
+    for (let i = 0; i < values.length; i++) {
+      const dateText = dateDisplayValues[i]?.[0];
+      if (!dateText) continue;
+      
+      const rowDate = parseSheetDate(dateText, start.getFullYear());
+      if (!rowDate) continue;
+      
+      const k = yyyymmdd(rowDate);
+      if (k >= startKey && k <= endKey) {
+        const amt = Number(values[i][AMOUNT_COL - 1]) || 0;
+        const desc = (values[i][DESC_COL - 1] || "").toString().trim();
+        totalInRange += amt;
+        
+        rangeRecords.push({
+          date: dateText,
+          isoDate: toISO(rowDate),
+          amount: amt,
+          description: desc
+        });
+      }
+    }
+
+    // 1. If the user provided a custom analysis query, let Gemini analyze the records
+    if (args.query) {
+      log(`handleGetSummary: Custom analysis query requested: "${args.query}"`);
+      sendMessage(chatId, "📊 Analyzing your expenses... Please wait a moment.");
+      const analysisResponse = analyzeExpensesWithLLM(rangeRecords, args.query, chatId);
+      sendMessage(chatId, analysisResponse);
+      return;
+    }
+
+    // 2. Otherwise, fall back to standard summary types
     if (args.start_date && args.end_date) {
-      log(`handleGetSummary: Range summary for ${args.start_date} to ${args.end_date}`);
-      const start = new Date(args.start_date);
-      const end = new Date(args.end_date);
-      const startKey = yyyymmdd(start);
-      const endKey = yyyymmdd(end);
-
-      let total = 0;
+      log(`handleGetSummary: Traditional range summary for ${args.start_date} to ${args.end_date}`);
+      
       const dayTotals = [];
       const itemRows = []; // {raw: desc, rowIndex, dateDisplay}
 
-      const dateDisplayValues = sheet.getRange(1, DATE_COL, lastRow, 1).getDisplayValues();
-
       for (let i = 0; i < values.length; i++) {
-        const dateText = dateDisplayValues[i][0];
+        const dateText = dateDisplayValues[i]?.[0];
         if (!dateText) continue;
         const rowDate = parseSheetDate(dateText, start.getFullYear());
         if (!rowDate) continue;
         const k = yyyymmdd(rowDate);
         if (k >= startKey && k <= endKey) {
           const amt = Number(values[i][AMOUNT_COL - 1]) || 0;
-          total += amt;
           dayTotals.push({ date: dateText, amount: amt });
           const d = (values[i][DESC_COL - 1] || "").toString();
           if (d) itemRows.push({ raw: d, rowIndex: i + 1, dateDisplay: dateText });
@@ -151,7 +192,7 @@ function handleGetSummary(chatId, args) {
         if (maxItem.amount > 0) {
           sendMessage(chatId, `📌 Highest single expense: *${maxItem.item}* ₹${fmt(maxItem.amount)} on ${maxItem.date}.`);
         } else {
-          sendMessage(chatId, `No individual items found between ${args.start_date} and ${args.end_date}. Total: *₹${fmt(total)}*.`);
+          sendMessage(chatId, `No individual items found between ${args.start_date} and ${args.end_date}. Total: *₹${fmt(totalInRange)}*.`);
         }
         return;
       }
@@ -174,17 +215,17 @@ function handleGetSummary(chatId, args) {
         } else {
           sendMessage(
             chatId,
-            `No individual items found between ${args.start_date} and ${args.end_date}. Total: *₹${fmt(total)}*.`
+            `No individual items found between ${args.start_date} and ${args.end_date}. Total: *₹${fmt(totalInRange)}*.`
           );
         }
         return;
       }
 
-      sendMessage(chatId, `From ${args.start_date} to ${args.end_date}, total: *₹${fmt(total)}*.`);
+      sendMessage(chatId, `From ${args.start_date} to ${args.end_date}, total: *₹${fmt(totalInRange)}*.`);
       return;
     }
 
-    // 2. Handle single date summaries
+    // 3. Handle single date summaries
     if (args.date) {
       log(`handleGetSummary: Single date summary for ${args.date}`);
       const rowNumber = findRowByDate(args.date);
@@ -202,7 +243,10 @@ function handleGetSummary(chatId, args) {
     log("handleGetSummary: Could not determine date or range.");
     sendMessage(chatId, "🤔 I couldn't figure out the date or range. Try `summary for July` or `expenses this week`.");
   } catch (err) {
-    log("handleGetSummary error: " + JSON.stringify(err, null, 2));
+    log("handleGetSummary error: " + (err.message || JSON.stringify(err, null, 2)));
+    if (err.message === "RATE_LIMIT_EXCEEDED") {
+      throw err;
+    }
     sendMessage(chatId, "⚠️ I had trouble computing the summary. Please try again.");
   }
 }
@@ -254,7 +298,7 @@ function handleModification(chatId, args) {
       modification = { newDescription: "", newAmount: 0 };
     } else {
       log("Calling Modification LLM API...");
-      modification = callModificationAPI(currentDesc, currentAmount, actionText, targetDate);
+      modification = callModificationAPI(currentDesc, currentAmount, actionText, targetDate, chatId);
     }
 
     if (!modification) {
@@ -289,7 +333,10 @@ function handleModification(chatId, args) {
     sendMessage(chatId, `✅ ${targetDate}: ${diffMessage} (new total ₹${fmt(afterAmount)})`);
 
   } catch (err) {
-    log("handleModification error: " + JSON.stringify(err, null, 2));
+    log("handleModification error: " + (err.message || JSON.stringify(err, null, 2)));
+    if (err.message === "RATE_LIMIT_EXCEEDED") {
+      throw err;
+    }
     sendMessage(chatId, "⚠️ Something went wrong while applying modifications.");
   }
 }

@@ -34,3 +34,15 @@ const AMOUNT_COL = 2;
  * @type {number}
  */
 const DESC_COL = 3;
+
+/**
+ * @description The model name to use for the Gemini API.
+ * Free Tier Models & Approx. Limits (Project-wide):
+ * - "gemini-2.5-flash-lite" (Default): ~15–20 RPM, 1,000 RPD - Fastest, lowest latency.
+ * - "gemini-2.5-flash": ~10 RPM, 1,500 RPD - Balanced reasoning and math.
+ * - "gemini-1.5-flash": ~15 RPM, 1,500 RPD - Stable legacy model.
+ * - "gemini-2.5-pro": ~2 RPM, 50 RPD - High intelligence but strict limits.
+ * @type {string}
+ */
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
+

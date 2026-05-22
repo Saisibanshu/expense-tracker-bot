@@ -25,8 +25,28 @@ function sendMessage(chatId, text) {
       text: text,
       parse_mode: "Markdown"
     };
-    const options = { method: "post", contentType: "application/json", payload: JSON.stringify(payload) };
-    UrlFetchApp.fetch(url, options);
+    const options = { 
+      method: "post", 
+      contentType: "application/json", 
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const statusCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    if (statusCode !== 200) {
+      log("sendMessage failed (status " + statusCode + "): " + responseText + ". Retrying as plain text...");
+      // Try again without Markdown parse_mode
+      delete payload.parse_mode;
+      options.payload = JSON.stringify(payload);
+      const retryResponse = UrlFetchApp.fetch(url, options);
+      const retryStatusCode = retryResponse.getResponseCode();
+      if (retryStatusCode !== 200) {
+        log("sendMessage plain retry failed (status " + retryStatusCode + "): " + retryResponse.getContentText());
+      }
+    }
   } catch (err) {
     log("sendMessage error: " + JSON.stringify(err, null, 2));
   }
